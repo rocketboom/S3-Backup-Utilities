@@ -72,7 +72,7 @@ connections.each do |connection, details|
     # call s3sync
     cmd = "#{S3SYNC} #{options} #{from} #{to}"
     puts "  #{cmd}"
-    # puts `#{cmd}`
+    puts `#{cmd}`
 
     puts "  Finished on #{Time.now}"
     puts
