@@ -1,0 +1,16 @@
+s3sync: /path/to/s3sync.rb
+
+connections:
+
+  connection1:
+    AWS_ACCESS_KEY_ID: over
+    AWS_SECRET_ACCESS_KEY: 9000
+    SSL_CERT_DIR: /path/to/certs/
+
+    jobs:
+      job1:
+        type: files # optional/default
+        options: srv # optional/default
+        timestamp: true # default false
+        from: /foo.txt
+        to: bucket:foo
