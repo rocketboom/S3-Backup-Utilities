@@ -56,23 +56,58 @@ connections.each do |connection, details|
     # use default or specified instructions
     from = instructions['from']
     to = instructions['to']
+    dbs = instructions['dbs']
     type = instructions['type'] || 'files'
     options = instructions['options'] || 'srv'
     options = "-#{options}"
     timestamp = instructions['timestamp'] || false
+    timestamp = true unless dbs.nil?
 
     to = "#{to}/#{Time.now.strftime '%m-%d-%Y-%H:%M:%S'}" if timestamp
 
-    # check for a source and destination
-    if instructions['from'].nil? || instructions['to'].nil?
-      puts "  Missing source or destination in #{job}.\n\n"
+    # check for a source and destination (unless db)
+    if dbs.nil? && (from.nil? || to.nil?)
+      puts "  Missing destination in #{job}.\n\n"
       next
     end
 
-    # call s3sync
-    cmd = "#{S3SYNC} #{options} #{from} #{to}"
-    puts "  #{cmd}"
-    puts `#{cmd}`
+    if dbs.nil? # process files
+      cmd = "#{S3SYNC} #{options} #{from} #{to}"
+      puts "  #{cmd}"
+      puts `#{cmd}`
+    else # process db dump
+      dbs.each do |db|
+        file = "#{db}-#{Time.now.strftime '%m-%d-%Y-%H:%M:%S'}.sql.gz"
+
+        # gzip the dump into tmp
+        cmd = "mysqldump #{db} | gzip > /tmp/#{file}"
+        puts "  #{cmd}"
+        puts `#{cmd}`
+
+        # create a new directory for the dump
+        tmp_dir = "#{Time.now.strftime '%m-%d-%Y-%H-%M-%S'}"
+        cmd = "mkdir /tmp/#{tmp_dir}"
+        puts "  #{cmd}"
+        puts `#{cmd}`
+
+        # move the dump into the new directory
+        cmd = "mv /tmp/#{file} /tmp/#{tmp_dir}/#{file}"
+        puts "  #{cmd}"
+        puts `#{cmd}`
+
+        # send to S3
+        cmd = "#{S3SYNC} #{options} /tmp/#{tmp_dir}/ #{to}"
+        puts "  #{cmd}"
+        puts `#{cmd}`
+
+        # remove tmp dir
+        cmd = "rm -rf /tmp/#{tmp_dir}"
+        puts "  #{cmd}"
+        `#{cmd}`
+
+        puts
+      end
+    end
 
     puts "  Finished on #{Time.now}"
     puts
