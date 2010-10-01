@@ -15,6 +15,7 @@
 
 require 'yaml'
 
+DEBUG = ENV['DEBUG'] || false
 
 # -------------
 
@@ -89,6 +90,7 @@ connections.each do |connection, details|
 
     job_type = instructions['type'] || 'files'
     job_dbs = instructions['dbs'] || false
+    job_dbs = (job_dbs && (job_dbs.nil? || job_dbs.empty?) ? nil : job_dbs)
     job_to = instructions['to']
     job_options = "-#{instructions['options'] || 'srv'}"
 
@@ -104,19 +106,18 @@ connections.each do |connection, details|
 
 
     # Add timestamp folder if required.
-    job_to = "#{to}/#{Time.now.strftime '%m-%d-%Y-%H:%M:%S'}" if job_timestamp
+    job_to = "#{job_to}/#{Time.now.strftime '%m-%d-%Y-%H:%M:%S'}" if job_timestamp
 
 
     # Check for a source and destination (unless db)
-    if dbs.nil? && (from.nil? || to.nil?)
+    if !job_dbs && (job_from.nil? || job_to.nil?)
       puts "#{timestamp} Missing destination in #{connection}:#{job}.\n\n"
       next
     end
 
-
     # Begin backup for databases
-    unless dbs.nil?
-      dbs.each do |db|
+    if job_dbs
+      job_dbs.each do |db|
         puts "#{timestamp} Begin db backup of #{connection}:#{job}:#{db}..."
         file = "#{db}-#{Time.now.strftime '%m-%d-%Y-%H:%M:%S'}.sql.gz"
 
@@ -151,10 +152,15 @@ connections.each do |connection, details|
 
     # Begin backup for files and other jobs
     else
-      puts "#{timestamp} Trasnmitting files for #{connection}:#{job}..."
-      cmd = "#{S3SYNC} #{options} #{from} #{to}"
-      puts "#{timestamp} Command: #{cmd}" if DEBUG
-      `#{cmd}`
+      # Lets check if files exist
+      if job_from.match(/\/$/) ? File.directory?(job_from) : File.file?(job_from)
+        puts "#{timestamp} Trasnmitting files for #{connection}:#{job}..."
+        cmd = "#{S3SYNC} #{job_options} #{job_from} #{job_to}"
+        puts "#{timestamp} Command: #{cmd}" if DEBUG
+        `#{cmd}`
+      else
+        puts "\n#{timestamp} ERROR: File or directory does not exist for #{connection}:#{job} >> #{job_from}\n\n"
+      end
     end
 
     puts "#{timestamp} Completed #{connection}:#{job}."
