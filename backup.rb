@@ -11,47 +11,65 @@
 #
 
 
+# -------------
 
 require 'yaml'
 
+
+# -------------
+
+# Output as error & exit.
 def error(str)
   $stderr.puts str
   exit
 end
 
+# Make pretty timestamp
 def timestamp; "[#{Time.now.to_s}]"; end
 
-# check if config.yml exists
+
+# -------------
+
+puts "#{timestamp} Beginning backup jobs."
+
+
+# Check if config.yml exists
 config = YAML.load_file('config.yml')
-error "#{timestamp} Your config.yml is empty." unless config
+error "Your config.yml is empty." unless config
 
-# check path to s3sync
+# Check path to s3sync
 S3SYNC = config['s3sync']
-error "#{timestamp} You must provide the path to s3sync.rb in config.yml" if S3SYNC.nil?
+error "You must provide the path to s3sync.rb in config.yml" if S3SYNC.nil?
 
-# check connections in config
+# Check connections in config
 connections = config['connections']
-error "#{timestamp} You must list your connections in config.yml" if connections.nil?
+error "You must list your connections in config.yml" if connections.nil?
 
-# process each connection
+
+# Process each connection
 connections.each do |connection, details|
   # check connection details
-  error "#{timestamp} You must set up your connection and job details in config.yml" if connection.nil? || details.nil?
+  if connection.nil? || details.nil?
+    puts "#{timestamp} ERROR: You must set up your connection and job details in config.yml for #{connection}"
+    next
+  end
 
   key = details['AWS_ACCESS_KEY_ID']
   secret = details['AWS_SECRET_ACCESS_KEY']
   cert_dir = details['SSL_CERT_DIR']
 
   # check connection credentials
-  error "#{timestamp} You must set up your connection credentials in config.yml" if key.nil? || secret.nil? || cert_dir.nil?
+  if key.nil? || secret.nil? || cert_dir.nil?
+    puts "#{timestamp} ERROR: You must set up your connection credentials in config.yml for #{connection}"
+    next
+  end
 
   # set environment variables for s3sync
   ENV['AWS_ACCESS_KEY_ID'] = key
   ENV['AWS_SECRET_ACCESS_KEY'] = secret
   ENV['SSL_CERT_DIR'] = cert_dir
 
-  puts "#{timestamp} Processing #{connection} "
-  puts
+  puts "#{timestamp} Processing #{connection}..."
 
   # check jobs
   if details['jobs'].nil?
@@ -61,73 +79,86 @@ connections.each do |connection, details|
 
   # process each job
   details['jobs'].each do |job, instructions|
-    puts "#{timestamp} Executing #{job}:"
+    puts "#{timestamp} Executing #{connection}:#{job}..."
 
     # check job instructions
     if job.nil? || instructions.nil?
-      puts "#{timestamp} No instructions found for #{job}.\n\n"
+      puts "#{timestamp} No instructions found for #{connection}:#{job}.\n\n"
       next
     end
 
-    # use default or specified instructions
-    from = instructions['from']
-    to = instructions['to']
-    dbs = instructions['dbs']
-    type = instructions['type'] || 'files'
-    options = instructions['options'] || 'srv'
-    options = "-#{options}"
-    timestamp = instructions['timestamp'] || false
-    timestamp = true unless dbs.nil?
+    job_type = instructions['type'] || 'files'
+    job_dbs = instructions['dbs'] || false
+    job_to = instructions['to']
+    job_options = "-#{instructions['options'] || 'srv'}"
 
-    to = "#{to}/#{Time.now.strftime '%m-%d-%Y-%H:%M:%S'}" if timestamp
+    # Config for database backups
+    if job_dbs
+      job_timestamp = true
 
-    # check for a source and destination (unless db)
+    # Config for file and other jobs
+    else
+      job_timestamp = instructions['timestamp'] || false
+      job_from = instructions['from']
+    end
+
+
+    # Add timestamp folder if required.
+    job_to = "#{to}/#{Time.now.strftime '%m-%d-%Y-%H:%M:%S'}" if job_timestamp
+
+
+    # Check for a source and destination (unless db)
     if dbs.nil? && (from.nil? || to.nil?)
-      puts "#{timestamp} Missing destination in #{job}.\n\n"
+      puts "#{timestamp} Missing destination in #{connection}:#{job}.\n\n"
       next
     end
 
-    if dbs.nil? # process files
-      cmd = "#{S3SYNC} #{options} #{from} #{to}"
-      puts "#{timestamp} Command: #{cmd}"
-      puts `#{cmd}`
-    else # process db dump
+
+    # Begin backup for databases
+    unless dbs.nil?
       dbs.each do |db|
+        puts "#{timestamp} Begin db backup of #{connection}:#{job}:#{db}..."
         file = "#{db}-#{Time.now.strftime '%m-%d-%Y-%H:%M:%S'}.sql.gz"
 
         # gzip the dump into tmp
-        cmd = "mysqldump #{db} | gzip > /tmp/#{file}"
-        puts "#{timestamp} Command: #{cmd}"
-        puts `#{cmd}`
+        cmd = "mysqldump #{db} | gzip > ./tmp/#{file}"
+        puts "#{timestamp} Command: #{cmd}" if DEBUG
+        `#{cmd}`
 
         # create a new directory for the dump
         tmp_dir = "#{Time.now.strftime '%m-%d-%Y-%H-%M-%S'}"
-        cmd = "mkdir /tmp/#{tmp_dir}"
-        puts "#{timestamp} Command: #{cmd}"
-        puts `#{cmd}`
-
-        # move the dump into the new directory
-        cmd = "mv /tmp/#{file} /tmp/#{tmp_dir}/#{file}"
-        puts "#{timestamp} Command: #{cmd}"
-        puts `#{cmd}`
-
-        # send to S3
-        cmd = "#{S3SYNC} #{options} /tmp/#{tmp_dir}/ #{to}"
-        puts "#{timestamp} Command: #{cmd}"
-        puts `#{cmd}`
-
-        # remove tmp dir
-        cmd = "rm -rf /tmp/#{tmp_dir}"
-        puts "#{timestamp} Command: #{cmd}"
+        cmd = "mkdir -p ./tmp/#{tmp_dir}"
+        puts "#{timestamp} Command: #{cmd}" if DEBUG
         `#{cmd}`
 
-        puts
+        # move the dump into the new directory
+        cmd = "mv ./tmp/#{file} ./tmp/#{tmp_dir}/#{file}"
+        puts "#{timestamp} Command: #{cmd}" if DEBUG
+        `#{cmd}`
+
+        # send to S3
+        cmd = "#{S3SYNC} #{options} ./tmp/#{tmp_dir}/ #{to}"
+        puts "#{timestamp} Command: #{cmd}" if DEBUG
+        `#{cmd}`
+
+        # remove tmp dir
+        cmd = "rm -rf ./tmp/#{tmp_dir}"
+        puts "#{timestamp} Command: #{cmd}" if DEBUG
+        `#{cmd}`
+
+        puts "#{timestamp} Completed db backup of #{db}.\n\n"
       end
+
+    # Begin backup for files and other jobs
+    else
+      puts "#{timestamp} Trasnmitting files for #{connection}:#{job}..."
+      cmd = "#{S3SYNC} #{options} #{from} #{to}"
+      puts "#{timestamp} Command: #{cmd}" if DEBUG
+      `#{cmd}`
     end
 
-    puts "#{timestamp} Finished #{job}."
-    puts
+    puts "#{timestamp} Completed #{connection}:#{job}."
   end
 end
 
-puts "#{timestamp} Finished backup utilities."
+puts "#{timestamp} Completed backup jobs."

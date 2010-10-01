@@ -8,9 +8,22 @@ connections:
     SSL_CERT_DIR: /path/to/certs/
 
     jobs:
+      # Example of file backup
       job1:
-        type: files # optional/default
-        options: srv # optional/default
-        timestamp: true # default false
-        from: /foo.txt
-        to: bucket:foo
+        type:       files           # Default: files
+        options:    srv             # Default: srv
+        timestamp:  true            # default: false (for files, always true for dbs)
+        from:       /foo.txt        # Required (for files only, not dbs)
+        to:         bucket:foo
+
+      # Example of database backup
+      job2:
+        dbs:                        # Array of database names (Based on one db user/pass. Create additional jobs for different user/pass auths.)
+          - db_name_1
+          - db_name_2
+        user:       root            # Optional
+        pass:       ******          # Optional
+        host:       localhost       # Optional
+        args:       --quick         # Optional
+        command:    mysqldump       # Optional (default: mysqldump)
+        to:         bucket:foo2
